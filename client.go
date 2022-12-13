@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"io/ioutil"
-	"log"
 	"net/http"
 	"reflect"
 )
@@ -18,22 +17,47 @@ type AleoClient struct {
 	faucetEndpoint string
 }
 
-func NewAleoClient(endpoint string) (*AleoClient, error) {
+func NewAleoClient(endpoint string, debug bool) (*AleoClient, error) {
 	client := &AleoClient{
 		endpoint: endpoint,
 		imp:      http.DefaultClient,
-		debug:    false,
+		debug:    debug,
 	}
 	return client, nil
 }
 
-func (ap *AleoClient) post(method string, param Params, value interface{}, options ...Option) error {
+func (ap *AleoClient) GetLatestHeight() (uint64, error) {
+	var result uint64
+	err := ap.get("testnet3/latest/height", nil, &result)
+	if err != nil {
+		return 0, err
+	}
+	return result, nil
+}
 
+func (ap *AleoClient) GetTransactionsByHeight(height uint64) (uint64, error) {
+	var result uint64
+	err := ap.post(fmt.Sprintf("testnet3/transactions/%v", height), nil, &result)
+	if err != nil {
+		return 0, err
+	}
+	return result, nil
+}
+
+func (ap *AleoClient) Transaction(txId string) (uint64, error) {
+	var result uint64
+	err := ap.get(fmt.Sprintf("testnet3/transaction/%v", txId), nil, &result)
+	if err != nil {
+		return 0, err
+	}
+	return result, nil
+}
+
+func (ap *AleoClient) post(method string, param Params, value interface{}, options ...Option) error {
 	return ap.httpReq(http.MethodPost, method, param, value, options...)
 }
 
 func (ap *AleoClient) put(method string, param Params, value interface{}, options ...Option) error {
-
 	return ap.httpReq(http.MethodPut, method, param, value, options...)
 }
 
@@ -57,6 +81,7 @@ func (ap *AleoClient) newRequest(httpMethod, url string, reqData []byte) (*http.
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Authorization", "Bearer MWRkMWMxMWEtMzUzMC00YTRmLTg5NDQtZjdkZDMwN2YwMjIy")
 	req.Header.Set("Content-Type", "application/json")
 	return req, nil
 }
@@ -88,13 +113,11 @@ func (ap *AleoClient) httpReq(httpMethod, path string, param Params, value inter
 	if vi.Kind() != reflect.Ptr {
 		return fmt.Errorf("value must be pointer")
 	}
-
 	if param != nil && len(options) > 0 {
 		for _, opt := range options {
 			param.SetValue(opt.Key, opt.Value)
 		}
 	}
-
 	var requestData []byte
 	if param != nil {
 		requestData, err = json.Marshal(param)
@@ -104,24 +127,24 @@ func (ap *AleoClient) httpReq(httpMethod, path string, param Params, value inter
 	}
 
 	url := fmt.Sprintf("%s/%s", ap.endpoint, path)
+	if ap.debug {
+		fmt.Printf("request: %v  %v \n", url, string(requestData))
+	}
+
 	req, err := ap.newRequest(httpMethod, url, requestData)
 	if err != nil {
 		return err
-	}
-	if ap.debug {
-		log.Printf("httpReq request: %v  %v \n", url, string(requestData))
 	}
 	resp, err := ap.imp.Do(req)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			defer resp.Body.Close()
 		}
-
 		return err
 	}
 	if resp == nil || resp.StatusCode < http.StatusOK || resp.StatusCode > 300 {
 		data, _ := ioutil.ReadAll(resp.Body)
-		return fmt.Errorf("response err: %v %v %v", resp.StatusCode, resp.Status, string(data))
+		return fmt.Errorf("response err: %v %v %v \n", resp.StatusCode, resp.Status, string(data))
 	}
 	if resp.Body != nil {
 		defer resp.Body.Close()
@@ -131,12 +154,12 @@ func (ap *AleoClient) httpReq(httpMethod, path string, param Params, value inter
 		return err
 	}
 	if ap.debug {
-		log.Printf("httpReq response: %v %v \n", path, string(data))
+		fmt.Printf("reqponse: %v  %v \n", url, string(data))
 	}
 	if len(data) != 0 {
 		err = json.Unmarshal(data, value)
 		if err != nil {
-			return fmt.Errorf("%v%s%s", err, path, string(data))
+			return fmt.Errorf("%v %s %s ", err, path, string(data))
 		}
 	}
 	return nil
